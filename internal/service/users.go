@@ -63,7 +63,7 @@ func (s *UserService) SignIn(ctx context.Context, input UserSignInInput) (Token,
 }
 
 func (s *UserService) AddOrder(ctx context.Context, order domain.Order) error {
-	err := s.storage.SetOrder(ctx, order)
+	err := s.storage.AddOrder(ctx, order)
 	if err != nil {
 		switch  {
 		case errors.Is(err, domain.ErrOrderAlreadyExists):
@@ -82,6 +82,47 @@ func (s *UserService) AddOrder(ctx context.Context, order domain.Order) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (s *UserService) GetOrders(ctx context.Context, userID int) ([]domain.Order, error) {
+	return s.storage.GetOrdersByUser(ctx, userID)
+}
+
+func (s *UserService) GetBalance(ctx context.Context, userID int) (domain.Balance, error) {
+	return s.storage.GetUserBalance(ctx, userID)
+}
+
+func (s *UserService) GetUserWithdrawals(ctx context.Context, userID int) ([]domain.Withdrawal, error) {
+	return s.storage.GetUserWithdrawals(ctx, userID)
+}
+
+func (s *UserService) Withdraw(ctx context.Context, userID int, input UserWithdrawInput) error {
+	balance, err := s.storage.GetUserBalance(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	if balance.Current < input.Sum {
+		return domain.ErrWithdrawalInsufficientFunds
+	}
+
+	err = s.storage.AddWithdrawal(ctx,domain.Withdrawal{
+		UserID: userID,
+		Order: input.Order,
+		Sum: input.Sum,
+		ProcessedAt: domain.Time(time.Now()),
+	})
+
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrWithdrawalAlreadyExists):
+			return err
+		default:
+			return err
+		}
+	}
+
 	return nil
 }
 

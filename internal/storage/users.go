@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgerrcode"
 	"github.com/lib/pq"
 	"gophermart/internal/domain"
 	"sync"
+	"time"
 )
 
 type UserStorage struct {
@@ -103,7 +105,7 @@ func (r *UserStorage) GetOrderByNumber(ctx context.Context, orderNumber string) 
 }
 
 func (r *UserStorage) GetOrdersByUser(ctx context.Context, userID int) ([]domain.Order, error) {
-	getOrdersStmt, err := r.db.PrepareContext(ctx, "SELECT number,status,accrual,uploaded_at FROM orders WHERE user_id=$1;")
+	getOrdersStmt, err := r.db.PrepareContext(ctx, "SELECT number,status,accrual,uploaded_at FROM orders WHERE user_id=$1 ORDER BY uploaded_at DESC;")
 	if err != nil {
 		return nil, &StatementPSQLError{Err: err}
 	}
@@ -183,7 +185,7 @@ func (r *UserStorage) GetOrdersByStatus(ctx context.Context, orderStatuses []dom
 	return orders, nil
 }
 
-func (r *UserStorage) SetOrder(ctx context.Context, order domain.Order) error {
+func (r *UserStorage) AddOrder(ctx context.Context, order domain.Order) error {
 	//check if user exists
 	checkUserStmt, err := r.db.PrepareContext(ctx, "SELECT id, current FROM users WHERE id = $1;")
 	if err != nil {
@@ -215,24 +217,25 @@ func (r *UserStorage) SetOrder(ctx context.Context, order domain.Order) error {
 	}
 	defer tx.Rollback()
 
-	setOrderStmt, err := r.db.PrepareContext(ctx, "INSERT INTO orders (number, user_id, status, accrual, uploaded_at) VALUES ($1, $2, $3, $4, $5);")
+	addOrderStmt, err := r.db.PrepareContext(ctx, "INSERT INTO orders (number, user_id, status, accrual, uploaded_at) VALUES ($1, $2, $3, $4, $5);")
 	if err != nil {
 		return &StatementPSQLError{Err: err}
 	}
-	defer setOrderStmt.Close()
+	defer addOrderStmt.Close()
 
-	txSetOrderStmt := tx.StmtContext(ctx, setOrderStmt)
-	defer txSetOrderStmt.Close()
+	txAddOrderStmt := tx.StmtContext(ctx, addOrderStmt)
+	defer txAddOrderStmt.Close()
 
-	_, err = txSetOrderStmt.ExecContext(
+	_, err = txAddOrderStmt.ExecContext(
 		ctx,
 		order.Number,
 		order.UserID,
 		order.Status,
 		order.Accrual,
-		order.UploadedAt,
+		time.Time(order.UploadedAt),
 		)
 	if err != nil {
+		fmt.Println(err)
 		errCode := err.(*pq.Error).Code
 		if pgerrcode.IsIntegrityConstraintViolation(string(errCode)) {
 			return &AlreadyExistsError{Err: domain.ErrOrderAlreadyExists}
@@ -247,7 +250,7 @@ func (r *UserStorage) SetOrder(ctx context.Context, order domain.Order) error {
 		if err != nil {
 			return &StatementPSQLError{Err: err}
 		}
-		defer setOrderStmt.Close()
+		defer addOrderStmt.Close()
 
 		txUpdateAccrualStmt := tx.StmtContext(ctx, updateAccrualStmt)
 		defer txUpdateAccrualStmt.Close()
@@ -266,7 +269,6 @@ func (r *UserStorage) SetOrder(ctx context.Context, order domain.Order) error {
 	return nil
 }
 
-//TODO Обновить текущий счет пользователя если статус окончательный
 func (r *UserStorage) UpdateOrders(ctx context.Context, orders []domain.Order) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -304,7 +306,7 @@ func (r *UserStorage) UpdateOrders(ctx context.Context, orders []domain.Order) e
 			order.UserID,
 			order.Status,
 			order.Accrual,
-			order.UploadedAt,
+			time.Time(order.UploadedAt),
 			order.Number,
 		)
 		if err != nil {
@@ -329,6 +331,134 @@ func (r *UserStorage) UpdateOrders(ctx context.Context, orders []domain.Order) e
 				return &ExecutionPSQLError{Err: err}
 			}
 		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return &ExecutionPSQLError{Err: err}
+	}
+
+	return nil
+}
+
+func (r *UserStorage) GetUserBalance(ctx context.Context, userID int) (domain.Balance, error) {
+	balance := domain.Balance{}
+
+	getBalanceStmt, err := r.db.PrepareContext(ctx, "SELECT current,withdrawn FROM users WHERE id=$1;")
+	if err != nil {
+		return balance, &StatementPSQLError{Err: err}
+	}
+	defer getBalanceStmt.Close()
+
+
+	r.mu.Lock()
+	if err := getBalanceStmt.QueryRowContext(ctx, userID).Scan(&balance.Current, &balance.Withdrawn); err != nil {
+		r.mu.Unlock()
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return balance, &NotFoundError{Err: domain.ErrUserNotFound}
+		default:
+			return balance, &ExecutionPSQLError{Err: err}
+		}
+	}
+
+	r.mu.Unlock()
+
+	return balance, nil
+}
+
+func (r *UserStorage) GetUserWithdrawals(ctx context.Context, userID int) ([]domain.Withdrawal, error) {
+	getWithdrawalsStmt, err := r.db.PrepareContext(ctx, "SELECT order_number,sum,processed_at FROM withdrawals WHERE user_id=$1 ORDER BY processed_at DESC;")
+	if err != nil {
+		return nil, &StatementPSQLError{Err: err}
+	}
+	defer getWithdrawalsStmt.Close()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rows, err := getWithdrawalsStmt.QueryContext(ctx, userID)
+	if err != nil {
+		return nil, &ExecutionPSQLError{Err: err}
+	}
+	defer rows.Close()
+
+	withdrawals := make([]domain.Withdrawal,0)
+	for rows.Next() {
+		var withdrawal domain.Withdrawal
+		err = rows.Scan(&withdrawal.Order, &withdrawal.Sum, &withdrawal.ProcessedAt)
+		if err != nil {
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				return nil, &NotFoundError{Err: domain.ErrWithdrawalNotFound}
+			default:
+				return nil, &ExecutionPSQLError{Err: err}
+			}
+		}
+		withdrawal.UserID = userID
+
+		withdrawals = append(withdrawals, withdrawal)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		return nil, &ExecutionPSQLError{Err: err}
+	}
+
+	return withdrawals, nil
+}
+
+func (r *UserStorage) AddWithdrawal(ctx context.Context, withdrawal domain.Withdrawal) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	//statements to add withdrawal
+	addWithdrawalStmt, err := r.db.PrepareContext(ctx, "INSERT INTO withdrawals (user_id,order_number,sum,processed_at) VALUES ($1,$2,$3,$4);")
+	if err != nil {
+		return &StatementPSQLError{Err: err}
+	}
+	defer addWithdrawalStmt.Close()
+
+	//statements to update accounts
+	updateAccountsStmt, err := r.db.PrepareContext(ctx, "UPDATE users SET current = current - $1, withdrawn = withdrawn + $1 WHERE id = $2;")
+	if err != nil {
+		return &StatementPSQLError{Err: err}
+	}
+	defer updateAccountsStmt.Close()
+
+	// begin transaction
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return &ExecutionPSQLError{Err: err}
+	}
+	defer tx.Rollback()
+
+	//add withdrawal
+	txAddWithdrawalStmt := tx.StmtContext(ctx, addWithdrawalStmt)
+	defer txAddWithdrawalStmt.Close()
+
+	_, err = txAddWithdrawalStmt.ExecContext(
+		ctx,
+		withdrawal.UserID,
+		withdrawal.Order,
+		withdrawal.Sum,
+		time.Time(withdrawal.ProcessedAt),
+	)
+	if err != nil {
+		errCode := err.(*pq.Error).Code
+		if pgerrcode.IsIntegrityConstraintViolation(string(errCode)) {
+			return &AlreadyExistsError{Err: domain.ErrWithdrawalAlreadyExists}
+		}
+		return &ExecutionPSQLError{Err: err}
+	}
+
+	//update accounts
+	txUpdateAccountsStmt := tx.StmtContext(ctx, updateAccountsStmt)
+	defer txUpdateAccountsStmt.Close()
+
+	_, err = txUpdateAccountsStmt.ExecContext(ctx, withdrawal.Sum, withdrawal.UserID)
+	if err != nil {
+		return &ExecutionPSQLError{Err: err}
 	}
 
 	err = tx.Commit()

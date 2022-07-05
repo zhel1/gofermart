@@ -26,11 +26,12 @@ func (h *Handler) initUserRoutes(r chi.Router) {
 
 			r.Post("/orders", h.PostOrders())
 			r.Get("/orders", h.GetOrders())
+			r.Get("/withdrawals", h.GetWithdrawals()) //*
 
 			r.Route("/balance", func(r chi.Router) {
 				r.Get("/", h.GetBalance())
 				r.Post("/withdraw", h.PostWithdraw())
-				r.Get("/withdrawals", h.GetWithdrawals())
+				r.Get("/withdrawals", h.GetWithdrawals()) //*
 			})
 		})
 	})
@@ -153,9 +154,9 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 		order := domain.Order{
 			Number: orderIDStr,
 			UserID: userIDCtx,
-			Status:domain.OrderStatusUnknown,
+			Status:domain.OrderStatusNew,
 			Accrual: 0,
-			UploadedAt: time.Now(),
+			UploadedAt: domain.Time(time.Now()),
 		}
 
 		err = h.services.Users.AddOrder(r.Context(), order)
@@ -163,7 +164,7 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 			switch {
 			case errors.Is(err, domain.ErrRepeatedOrderRequest):
 				//200 — номер заказа уже был загружен этим пользователем;
-				http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+				http.Error(w, err.Error(), http.StatusOK)
 				return
 			case errors.Is(err, domain.ErrForeignOrder):
 				//409 — номер заказа уже был загружен другим пользователем;
@@ -187,6 +188,36 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 func (h *Handler)GetOrders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("GetOrders")
+
+		var userIDCtx int
+		if id := r.Context().Value(userCtx); id != nil {
+			userIDCtx = id.(int)
+		}
+
+		orders, err := h.services.Users.GetOrders(r.Context(), userIDCtx)
+		if err != nil {
+			switch {
+			case errors.Is(err, domain.ErrOrdersNotFound):
+				//204 — нет данных для ответа
+				http.Error(w, err.Error(), http.StatusNoContent)
+				return
+			default:
+				//500 — внутренняя ошибка сервера
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		result, err := json.Marshal(orders)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		//200 — успешная обработка запроса
+		w.Header().Set("content-type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, string(result))
 	}
 }
 
@@ -194,13 +225,75 @@ func (h *Handler)GetOrders() http.HandlerFunc {
 func (h *Handler)GetBalance() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("GetBalance")
+
+		var userIDCtx int
+		if id := r.Context().Value(userCtx); id != nil {
+			userIDCtx = id.(int)
+		}
+
+		balance, err := h.services.Users.GetBalance(r.Context(), userIDCtx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		result, err := json.Marshal(balance)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		//200 — успешная обработка запроса
+		w.Header().Set("content-type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, string(result))
 	}
+}
+
+type withdrawInput struct {
+	Order    string `json:"order"`
+	Sum 	 float32 `json:"sum"`
 }
 
 //request to withdraw points from the account to pay for a new order
 func (h *Handler)PostWithdraw() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("PostWithdraw")
+
+		var userIDCtx int
+		if id := r.Context().Value(userCtx); id != nil {
+			userIDCtx = id.(int)
+		}
+
+		inp := withdrawInput{}
+		if err := json.NewDecoder(r.Body).Decode(&inp); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest) //400
+			return
+		}
+
+		if !luhn.Valid(inp.Order) {
+			//422 — неверный формат номера заказа;
+			http.Error(w,"invalid order number format", http.StatusUnprocessableEntity)
+			return
+		}
+
+		err := h.services.Users.Withdraw(r.Context(), userIDCtx, service.UserWithdrawInput {
+			Order:  inp.Order,
+			Sum:    inp.Sum,
+		})
+
+		if err != nil {
+			if errors.Is(err, domain.ErrWithdrawalInsufficientFunds) {
+				//402 — на счету недостаточно средств;
+				http.Error(w, err.Error(), http.StatusPaymentRequired)
+				return
+			}
+			http.Error(w, err.Error(), http.StatusInternalServerError) //500
+			return
+		}
+
+		//200 — успешная обработка запроса;
+		w.WriteHeader(http.StatusOK)
 	}
 }
 
@@ -208,5 +301,36 @@ func (h *Handler)PostWithdraw() http.HandlerFunc {
 func (h *Handler)GetWithdrawals() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		fmt.Println("GetWithdrawals")
+
+		var userIDCtx int
+		if id := r.Context().Value(userCtx); id != nil {
+			userIDCtx = id.(int)
+		}
+
+		withdrawals, err := h.services.Users.GetUserWithdrawals(r.Context(), userIDCtx)
+		if err != nil {
+			switch {
+			case errors.Is(err, domain.ErrWithdrawalNotFound):
+				//204 — нет данных для ответа
+				http.Error(w, err.Error(), http.StatusNoContent)
+				return
+			default:
+				//500 — внутренняя ошибка сервера
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		result, err := json.Marshal(withdrawals)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		//200 — успешная обработка запроса
+		w.Header().Set("content-type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, string(result))
+
 	}
 }

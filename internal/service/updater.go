@@ -89,7 +89,6 @@ func (u *UpdaterService)run() error {
 			case <-u.ctx.Done():
 				return
 			case <- askAccrualServiceTicker.C:
-				fmt.Println("askAccrualServiceTicker")
 				//опрашиваем сервис на предмет обработки заказов из кеша
 				u.mu.Lock()
 				reducedOrders := make([]domain.Order,0)
@@ -122,7 +121,7 @@ func (u *UpdaterService)run() error {
 							u.orders[i].Status = domain.OrderStatusProcessed
 							u.orders[i].Accrual = accrual.Accrual
 						default:
-							u.orders[i].Status = domain.OrderStatusUnknown
+							u.orders[i].Status = domain.OrderStatusNew
 							askAccrualServiceError <- fmt.Errorf("unknown accrual status")
 						}
 

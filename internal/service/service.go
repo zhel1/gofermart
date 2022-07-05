@@ -25,10 +25,20 @@ type Token struct {
 	AccessToken  string
 }
 
+type UserWithdrawInput struct {
+	Order   string
+	Sum 	float32
+
+}
+
 type Users interface {
 	SignUp(ctx context.Context, input UserSignUpInput) error
 	SignIn(ctx context.Context, input UserSignInInput) (Token, error)
 	AddOrder(ctx context.Context, order domain.Order) error
+	GetOrders(ctx context.Context, userID int) ([]domain.Order, error)
+	GetBalance(ctx context.Context, userID int) (domain.Balance, error)
+	GetUserWithdrawals(ctx context.Context, userID int) ([]domain.Withdrawal, error)
+	Withdraw(ctx context.Context, userID int, input UserWithdrawInput) error
 }
 
 //**********************************************************************************************************************
@@ -122,7 +132,7 @@ type Deps struct {
 }
 
 func NewServices(deps Deps) *Services {
-	statuses := []domain.OrderStatus{domain.OrderStatusRegistered, domain.OrderStatusProcessing, domain.OrderStatusUnknown}
+	statuses := []domain.OrderStatus{domain.OrderStatusRegistered, domain.OrderStatusProcessing, domain.OrderStatusNew}
 	orders, err := deps.Storages.Users.GetOrdersByStatus(context.Background(), statuses)
 	if err != nil && !errors.Is(err, domain.ErrOrdersNotFound) {
 		log.Fatal(err.Error())

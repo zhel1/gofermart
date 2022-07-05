@@ -7,11 +7,16 @@ var (
 	ErrUserNotFound 						= errors.New("user doesn't exists")
 	ErrUserAlreadyExists       				= errors.New("user with such login already exists")
 	ErrUserBadPassword		 				= errors.New("bad password")
+
 	ErrOrdersNotFound			 			= errors.New("orders were not found")
 	ErrOrderAlreadyExists			 		= errors.New("order was already added")
 
 	ErrRepeatedOrderRequest					= errors.New("order was already added by you")
 	ErrForeignOrder					 		= errors.New("order was already added by another user")
+
+	ErrWithdrawalNotFound          			= errors.New("withdrawal were not found")
+	ErrWithdrawalAlreadyExists     			= errors.New("withdrawal was already added")
+	ErrWithdrawalInsufficientFunds 			= errors.New("insufficient funds to withdraw")
 )
 
 //accrual

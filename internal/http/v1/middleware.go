@@ -3,7 +3,6 @@ package v1
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
 )
@@ -15,7 +14,6 @@ const (
 //checks that user is authorised and puts his id into context
 func (h *Handler) checkUserIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("middleware ... ")
 		tokenCookie, err := r.Cookie("AccessToken") //TODO make constant
 		if errors.Is(err, http.ErrNoCookie) { //no cookie
 			http.Error(w, err.Error(), http.StatusUnauthorized)
@@ -36,7 +34,6 @@ func (h *Handler) checkUserIdentity(next http.Handler) http.Handler {
 				return
 			}
 
-			fmt.Println("user authenticated!")
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtx, userIDInt)))
 		}
 	})

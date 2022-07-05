@@ -21,7 +21,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db, err := newInPSQL(cfg.DatabaseDSN)
+	db, err := newInPSQL("postgres://postgres:root@localhost:5432/gophermart?sslmode=disable")
+	//db, err := newInPSQL(cfg.DatabaseDSN)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -80,20 +81,22 @@ func createTable(db *sql.DB) error {
 		login text not null unique,
 		password text not null,
         "current" float not null default 0,
-        withdrawn int not null  default 0
+        withdrawn float not null  default 0
     );
 	CREATE TABLE IF NOT EXISTS orders (
 		"number" text primary key unique,
 		user_id int not null references users(id),
 		status text not null,
-		accrual int,
+		accrual float,
 		uploaded_at timestamp
 	);
 	CREATE TABLE IF NOT EXISTS withdrawals (
-		order_number text not null unique references orders(number),
-		sum int not null,
+		user_id int not null references users(id),
+		"order_number" text not null unique,
+		"sum" float not null,
 		processed_at timestamp
 	);`
 	_, err := db.Exec(query)
 	return err
 }
+
