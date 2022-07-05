@@ -7,10 +7,17 @@ import (
 	"strconv"
 )
 
-const (
-	userCtx    = "userId"
+type CookieConst string
+
+func (c CookieConst) String() string {
+	return string(c)
+}
+
+var (
+	UserIDCtxName CookieConst = "UserID"
 )
 
+//**********************************************************************************************************************
 //checks that user is authorised and puts his id into context
 func (h *Handler) checkUserIdentity(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -34,7 +41,7 @@ func (h *Handler) checkUserIdentity(next http.Handler) http.Handler {
 				return
 			}
 
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userCtx, userIDInt)))
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), UserIDCtxName, userIDInt)))
 		}
 	})
 }

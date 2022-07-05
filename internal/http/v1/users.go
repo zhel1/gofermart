@@ -46,10 +46,9 @@ type signInInput struct {
 //user registration
 func (h *Handler)PostRegister() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("PostRegister")
 		inp := signInInput{}
 		if err := json.NewDecoder(r.Body).Decode(&inp); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest) //400
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -60,10 +59,10 @@ func (h *Handler)PostRegister() http.HandlerFunc {
 
 		if err != nil {
 			if errors.Is(err, domain.ErrUserAlreadyExists) {
-				http.Error(w, err.Error(), http.StatusConflict) //409
+				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError) //500
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -74,7 +73,7 @@ func (h *Handler)PostRegister() http.HandlerFunc {
 		})
 
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError) //500
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -96,10 +95,9 @@ type signUpInput struct {
 //user authentication
 func (h *Handler)PostLogin() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("PostLogin")
 		inp := signUpInput{}
 		if err := json.NewDecoder(r.Body).Decode(&inp); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest) //400
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
@@ -110,10 +108,10 @@ func (h *Handler)PostLogin() http.HandlerFunc {
 
 		if err != nil {
 			if errors.Is(err, domain.ErrUserNotFound) {
-				http.Error(w, err.Error(), http.StatusUnauthorized) //401
+				http.Error(w, err.Error(), http.StatusUnauthorized)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError) //500
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -130,10 +128,8 @@ func (h *Handler)PostLogin() http.HandlerFunc {
 //upload the order number by user for calculation
 func (h *Handler)PostOrders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("PostOrders")
 		orderID, err := io.ReadAll(r.Body)
 		if err != nil {
-			//400 — неверный формат запроса;
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -141,13 +137,12 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 		orderIDStr := strings.TrimSpace(string(orderID))
 
 		if !luhn.Valid(orderIDStr) {
-			//422 — неверный формат номера заказа;
 			http.Error(w,"invalid order number format", http.StatusUnprocessableEntity)
 			return
 		}
 
 		var userIDCtx int
-		if id := r.Context().Value(userCtx); id != nil {
+		if id := r.Context().Value(UserIDCtxName); id != nil {
 			userIDCtx = id.(int)
 		}
 
@@ -163,15 +158,12 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, domain.ErrRepeatedOrderRequest):
-				//200 — номер заказа уже был загружен этим пользователем;
 				http.Error(w, err.Error(), http.StatusOK)
 				return
 			case errors.Is(err, domain.ErrForeignOrder):
-				//409 — номер заказа уже был загружен другим пользователем;
 				http.Error(w, err.Error(), http.StatusConflict)
 				return
 			default:
-				//500 — внутренняя ошибка сервера.
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -179,7 +171,6 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 
 		h.services.Updater.AddOrder(order)
 
-		//202 — новый номер заказа принят в обработку;
 		w.WriteHeader(http.StatusAccepted)
 	}
 }
@@ -187,10 +178,8 @@ func (h *Handler)PostOrders() http.HandlerFunc {
 //get a list of order numbers uploaded by the user, their processing statuses and information about accruals
 func (h *Handler)GetOrders() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("GetOrders")
-
 		var userIDCtx int
-		if id := r.Context().Value(userCtx); id != nil {
+		if id := r.Context().Value(UserIDCtxName); id != nil {
 			userIDCtx = id.(int)
 		}
 
@@ -198,11 +187,10 @@ func (h *Handler)GetOrders() http.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, domain.ErrOrdersNotFound):
-				//204 — нет данных для ответа
 				http.Error(w, err.Error(), http.StatusNoContent)
 				return
 			default:
-				//500 — внутренняя ошибка сервера
+
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -214,7 +202,6 @@ func (h *Handler)GetOrders() http.HandlerFunc {
 			return
 		}
 
-		//200 — успешная обработка запроса
 		w.Header().Set("content-type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, string(result))
@@ -224,10 +211,8 @@ func (h *Handler)GetOrders() http.HandlerFunc {
 //get the current account balance of the user's loyalty points
 func (h *Handler)GetBalance() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("GetBalance")
-
 		var userIDCtx int
-		if id := r.Context().Value(userCtx); id != nil {
+		if id := r.Context().Value(UserIDCtxName); id != nil {
 			userIDCtx = id.(int)
 		}
 
@@ -243,7 +228,6 @@ func (h *Handler)GetBalance() http.HandlerFunc {
 			return
 		}
 
-		//200 — успешная обработка запроса
 		w.Header().Set("content-type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, string(result))
@@ -258,10 +242,8 @@ type withdrawInput struct {
 //request to withdraw points from the account to pay for a new order
 func (h *Handler)PostWithdraw() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("PostWithdraw")
-
 		var userIDCtx int
-		if id := r.Context().Value(userCtx); id != nil {
+		if id := r.Context().Value(UserIDCtxName); id != nil {
 			userIDCtx = id.(int)
 		}
 
@@ -272,7 +254,6 @@ func (h *Handler)PostWithdraw() http.HandlerFunc {
 		}
 
 		if !luhn.Valid(inp.Order) {
-			//422 — неверный формат номера заказа;
 			http.Error(w,"invalid order number format", http.StatusUnprocessableEntity)
 			return
 		}
@@ -284,15 +265,13 @@ func (h *Handler)PostWithdraw() http.HandlerFunc {
 
 		if err != nil {
 			if errors.Is(err, domain.ErrWithdrawalInsufficientFunds) {
-				//402 — на счету недостаточно средств;
 				http.Error(w, err.Error(), http.StatusPaymentRequired)
 				return
 			}
-			http.Error(w, err.Error(), http.StatusInternalServerError) //500
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		//200 — успешная обработка запроса;
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -300,10 +279,8 @@ func (h *Handler)PostWithdraw() http.HandlerFunc {
 //getting information about the withdrawal of funds from the savings account by the user.
 func (h *Handler)GetWithdrawals() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fmt.Println("GetWithdrawals")
-
 		var userIDCtx int
-		if id := r.Context().Value(userCtx); id != nil {
+		if id := r.Context().Value(UserIDCtxName); id != nil {
 			userIDCtx = id.(int)
 		}
 
@@ -311,11 +288,9 @@ func (h *Handler)GetWithdrawals() http.HandlerFunc {
 		if err != nil {
 			switch {
 			case errors.Is(err, domain.ErrWithdrawalNotFound):
-				//204 — нет данных для ответа
 				http.Error(w, err.Error(), http.StatusNoContent)
 				return
 			default:
-				//500 — внутренняя ошибка сервера
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -327,7 +302,6 @@ func (h *Handler)GetWithdrawals() http.HandlerFunc {
 			return
 		}
 
-		//200 — успешная обработка запроса
 		w.Header().Set("content-type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, string(result))
