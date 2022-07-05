@@ -21,8 +21,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	db, err := newInPSQL("postgres://postgres:root@localhost:5432/gophermart?sslmode=disable")
-	//db, err := newInPSQL(cfg.DatabaseDSN)
+	db, err := newInPSQL(cfg.DatabaseDSN)
 	if err != nil {
 		log.Fatal(err)
 	}
